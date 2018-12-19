@@ -196,16 +196,19 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 			}
 
 			// Make new node a child of this node
+			//如果公共前缀和新添加路由的path一样
 			//抽取非公共部分 创建新节点
 			if i < len(path) {
 				//path非公共部分 比如新路由/hellogo的go
 				path = path[i:]
 
 				//如果本节点是一个参数节点的父节点
+				//就让n指向参数节点
 				if n.wildChild {
 					n = n.children[0]
 					n.priority++
 
+					//如果后面还有参数节点
 					// Update maxParams of the child node
 					if numParams > n.maxParams {
 						n.maxParams = numParams
@@ -213,6 +216,10 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 					numParams--
 
 					// Check if the wildcard matches
+					//如果上面没有continue 那么路由有问题 报错
+					//这里有个bug
+					//如果添加的两条路由为/aaa/:bbb/ccc 和 /aaa/:bbb/ddd/:eee/fff 会panic出来 反之不会
+					//如果上述的路由第二条变成/aaa/:bbb/ddd/:eee/fff/:ggg/hhh 则不会panic出来
 					if len(path) >= len(n.path) && n.path == path[:len(n.path)] {
 						// check for longer wildcard, e.g. :name and :names
 						if len(n.path) >= len(path) || path[len(n.path)] == '/' {
@@ -232,8 +239,10 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 						"'")
 				}
 
+				//后面没有参数节点了
 				c := path[0]
 
+				//如果本节点是参数节点 TODO:这个if没看懂
 				// slash after param
 				if n.nType == param && c == '/' && len(n.children) == 1 {
 					n = n.children[0]
@@ -252,9 +261,13 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 				}
 
 				// Otherwise insert it
+				//如果当前节点不是参数节点
 				if c != ':' && c != '*' {
 					// []byte for proper unicode char conversion, see #65
+					//更新快速查找字符串
 					n.indices += string([]byte{c})
+					//新的节点
+					//上例中/hellogo中的go
 					child := &node{
 						maxParams: numParams,
 					}
@@ -266,6 +279,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 				return
 
 			} else if i == len(path) { // Make node a (in-path) leaf
+				//向该节点添加handlesChain
 				if n.handlers != nil {
 					panic("handlers are already registered for path '" + fullPath + "'")
 				}
@@ -274,6 +288,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 			return
 		}
 	} else { // Empty tree
+	//如果是一棵空的树 那么就以刚添加的节点为root节点
 		n.insertChild(numParams, path, fullPath, handlers)
 		n.nType = root
 	}
