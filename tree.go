@@ -104,12 +104,22 @@ type node struct {
 }
 
 // increments priority of the given child and reorders if necessary.
-//对子节点和节点的indices排序 TODO:暂时不是很懂 只知道作用 似乎是根据优先级排序
+//对子节点和节点的indices排序
+//新的路由添加后 对子节点按照优先级 对children和indices进行排序
+//优先级为该节点下的(包括该节点本身和子节点)的路由数量
+//pos是新增的路由的节点下下标
+//调用时如果是新添加的节点 那么新节点的path暂时为空 位于数组的最后一个元素
+//如第一条路由是/helloworld 第二条是/hellogo
+//n就是/hello节点 pos就是1
+//如现有两条路由 /helloworld和/hellogo
+//新添加一条路由 /hellowowowo
+//这里会调用两次 第一次n是/hello pos是0 第二次调用n是wo pos是1
 func (n *node) incrementChildPrio(pos int) int {
 	n.children[pos].priority++
 	prio := n.children[pos].priority
 
 	// adjust position (move to front)
+	//因为只变动了一个节点的优先级 其他节点是从大到小排序好的 使用冒泡的方法排序子节点数组
 	newPos := pos
 	for newPos > 0 && n.children[newPos-1].priority < prio {
 		// swap node positions
@@ -118,6 +128,7 @@ func (n *node) incrementChildPrio(pos int) int {
 		newPos--
 	}
 
+	//排序好之后修改快速索引字符串
 	// build new index char string
 	if newPos != pos {
 		n.indices = n.indices[:newPos] + // unchanged prefix, might be empty
@@ -125,6 +136,7 @@ func (n *node) incrementChildPrio(pos int) int {
 			n.indices[newPos:pos] + n.indices[pos+1:] // rest without char at 'pos'
 	}
 
+	//返回排序好之后新节点的下标
 	return newPos
 }
 
@@ -220,6 +232,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 					//这里有个bug
 					//如果添加的两条路由为/aaa/:bbb/ccc 和 /aaa/:bbb/ddd/:eee/fff 会panic出来 反之不会
 					//如果上述的路由第二条变成/aaa/:bbb/ddd/:eee/fff/:ggg/hhh 则不会panic出来
+					//TODO:好像没这个问题了 好像是我的问题
 					if len(path) >= len(n.path) && n.path == path[:len(n.path)] {
 						// check for longer wildcard, e.g. :name and :names
 						if len(n.path) >= len(path) || path[len(n.path)] == '/' {
@@ -242,7 +255,8 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 				//后面没有参数节点了
 				c := path[0]
 
-				//如果本节点是参数节点 TODO:这个if没看懂
+				//如果本节点是参数节点
+				//// TODO:这个if没看懂 如果说一个节点是参数节点 那么c应该是':'但是这里是'/'才行 不太懂
 				// slash after param
 				if n.nType == param && c == '/' && len(n.children) == 1 {
 					n = n.children[0]
@@ -294,9 +308,16 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 	}
 }
 
+//向节点插入子节点数据
+//这里的n就是新节点了，而不是新节点的父节点
+//就例如原本有一条/helloworld路由 新添加一条/hellogo路由
+//这里的n不是/hello这个节点 而是在/hello下面新开的一个空节点
+//(自我感觉这种做法有点怪)
+//TODO:正在读
 func (n *node) insertChild(numParams uint8, path string, fullPath string, handlers HandlersChain) {
 	var offset int // already handled bytes of the path
 
+	//这个loop是解析参数路由
 	// find prefix until first wildcard (beginning with ':' or '*')
 	for i, max := 0, len(path); numParams > 0; i++ {
 		c := path[i]
