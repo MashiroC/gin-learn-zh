@@ -11,6 +11,7 @@ import (
 )
 
 // Param is a single URL parameter, consisting of a key and a value.
+//参数
 type Param struct {
 	Key   string
 	Value string
@@ -45,7 +46,7 @@ func (ps Params) ByName(name string) (va string) {
 //方法对应的路由树
 type methodTree struct {
 	method string //方法
-	root   *node //路由树的根节点
+	root   *node  //路由树的根节点
 }
 
 type methodTrees []methodTree
@@ -60,6 +61,7 @@ func (trees methodTrees) get(method string) *node {
 	return nil
 }
 
+//求出两个值的小值
 func min(a, b int) int {
 	if a <= b {
 		return a
@@ -67,7 +69,7 @@ func min(a, b int) int {
 	return b
 }
 
-//计算路由内的路由参数的数量
+//计算该path下路由参数的数量
 func countParams(path string) uint8 {
 	var n uint
 	for i := 0; i < len(path); i++ {
@@ -85,22 +87,22 @@ func countParams(path string) uint8 {
 type nodeType uint8
 
 const (
-	static nodeType = iota // default //普通节点
-	root //根节点
-	param //参数节点
-	catchAll //TODO:还没看懂这个
+	static   nodeType = iota // default
+	root                     // 根节点
+	param                    // 参数节点
+	catchAll                 // 相当于是参数节点的加强版 catchAll节点只能是叶子节点 获取指定规则后面所有的字符 我称为匹配节点
 )
 
 //路由树上的节点
 type node struct {
-	path      string //节点的路由
-	indices   string //子节点快速查找字符串，由每个子节点的首字母构成，根据子节点下节点总数排序
-	children  []*node //子节点
+	path      string        //节点的路由
+	indices   string        //子节点快速查找字符串，由每个子节点的首字母构成，根据子节点下节点总数排序
+	children  []*node       //子节点
 	handlers  HandlersChain //处理该节点的方法的链
-	priority  uint32 //优先级 TODO:不是很懂 暂时的理解只和indices的排序有关
-	nType     nodeType //节点类型
-	maxParams uint8 //节点下路由的最大路由参数数量
-	wildChild bool //是否为一个路由参数的节点的父节点 如果是 那么该节点下一层不能有路由参数节点外其他节点存在
+	priority  uint32        //优先级。根据节点下的节点数量赋值
+	nType     nodeType      //节点类型
+	maxParams uint8         //节点下路由的最大路由参数数量
+	wildChild bool          //是否为一个路由参数的节点的父节点 如果是 那么该节点下一层不能有路由参数节点外其他节点存在
 }
 
 // increments priority of the given child and reorders if necessary.
@@ -228,7 +230,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 					numParams--
 
 					// Check if the wildcard matches
-					//如果上面没有continue 那么路由有问题 报错
+					//检查路由 如果没问题则continue 有问题panic出来
 					//这里有个bug
 					//如果添加的两条路由为/aaa/:bbb/ccc 和 /aaa/:bbb/ddd/:eee/fff 会panic出来 反之不会
 					//如果上述的路由第二条变成/aaa/:bbb/ddd/:eee/fff/:ggg/hhh 则不会panic出来
@@ -256,7 +258,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 				c := path[0]
 
 				//如果本节点是参数节点
-				//// TODO:这个if没看懂 如果说一个节点是参数节点 那么c应该是':'但是这里是'/'才行 不太懂
+				//当一个参数节点读取到`/`证明已经取出来了一个完整的参数节点
 				// slash after param
 				if n.nType == param && c == '/' && len(n.children) == 1 {
 					n = n.children[0]
@@ -302,7 +304,7 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 			return
 		}
 	} else { // Empty tree
-	//如果是一棵空的树 那么就以刚添加的节点为root节点
+		//如果是一棵空的树 那么就以刚添加的节点为root节点
 		n.insertChild(numParams, path, fullPath, handlers)
 		n.nType = root
 	}
@@ -313,7 +315,6 @@ func (n *node) addRoute(path string, handlers HandlersChain) {
 //就例如原本有一条/helloworld路由 新添加一条/hellogo路由
 //这里的n不是/hello这个节点 而是在/hello下面新开的一个空节点
 //(自我感觉这种做法有点怪)
-//TODO:正在读
 func (n *node) insertChild(numParams uint8, path string, fullPath string, handlers HandlersChain) {
 	var offset int // already handled bytes of the path
 
@@ -326,6 +327,8 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 		}
 
 		// find wildcard end (either '/' or path end)
+		//end是参数节点的节点名字最后一个字母下标 比如:name中的e的下标
+		//如果当前参数节点:或*存在两个或以上 不符合路由规则 panic出来
 		end := i + 1
 		for end < max && path[end] != '/' {
 			switch path[end] {
@@ -340,18 +343,22 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 
 		// check if this Node existing children which would be
 		// unreachable if we insert the wildcard here
+		//因为当前节点n是新插入的节点，所以n下面不应该有子节点
 		if len(n.children) > 0 {
 			panic("wildcard route '" + path[i:end] +
 				"' conflicts with existing children in path '" + fullPath + "'")
 		}
 
 		// check if the wildcard has a name
+		//路由规则不应有一个或零个字母表示的参数节点，比如`:`或`:a` 如果有 panic出来
 		if end-i < 2 {
 			panic("wildcards must be named with a non-empty name in path '" + fullPath + "'")
 		}
 
+		//如果当前是参数节点
 		if c == ':' { // param
 			// split path at the beginning of the wildcard
+			//拿到参数节点之前的uri 赋给当前节点
 			if i > 0 {
 				n.path = path[offset:i]
 				offset = i
@@ -363,13 +370,16 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 			}
 			n.children = []*node{child}
 			n.wildChild = true
+			//现在是子节点 也就是该给参数节点赋值了
 			n = child
 			n.priority++
 			numParams--
 
 			// if the path doesn't end with the wildcard, then there
 			// will be another non-wildcard subpath starting with '/'
+			//如果后面还有节点 end==max代表参数节点后面没有新的节点了
 			if end < max {
+				//给当前的参数节点赋值
 				n.path = path[offset:end]
 				offset = end
 
@@ -378,27 +388,38 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 					priority:  1,
 				}
 				n.children = []*node{child}
+				//现在n是参数节点的子节点 也就是应该给`/welcome/:name/hello`中的`/hello`节点赋值了
 				n = child
 			}
 
 		} else { // catchAll
+			//匹配节点
+			//判断匹配节点是不是在uri的最后 匹配节点只能在uri的最后
 			if end != max || numParams > 1 {
 				panic("catch-all routes are only allowed at the end of the path in path '" + fullPath + "'")
 			}
 
+			//匹配节点不能在中间 TODO:没太看懂这个
 			if len(n.path) > 0 && n.path[len(n.path)-1] == '/' {
 				panic("catch-all conflicts with existing handle for the path segment root in path '" + fullPath + "'")
 			}
 
 			// currently fixed width 1 for '/'
+			//匹配节点的上一个字母只能是`/`
 			i--
 			if path[i] != '/' {
 				panic("no / before catch-all in path '" + fullPath + "'")
 			}
 
+			//抽取出匹配节点前的uri 给当前节点赋值
+			//比如`/welcome/*name`中的`/welcome/`
 			n.path = path[offset:i]
 
+			//一个匹配节点需要在tree上开两个节点
+			//第一个节点拥有一个空的path 它只有一个子节点 就是第二个节点 子节点的path是匹配节点的*key
+
 			// first node: catchAll node with empty path
+			//第一个节点
 			child := &node{
 				wildChild: true,
 				nType:     catchAll,
@@ -410,6 +431,7 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 			n.priority++
 
 			// second node: node holding the variable
+			//第二个节点 也是第一个的子节点
 			child = &node{
 				path:      path[i:],
 				nType:     catchAll,
@@ -419,11 +441,14 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 			}
 			n.children = []*node{child}
 
+			//匹配节点后面不再有未处理的path
 			return
 		}
 	}
 
 	// insert remaining path part and handle to the leaf
+	//给参数路由最后剩下的部分赋值
+	//比如`/welcome/:name`中的`:name` 或`/welcome/:name/hello`中的`/hello`
 	n.path = path[offset:]
 	n.handlers = handlers
 }
@@ -433,16 +458,27 @@ func (n *node) insertChild(numParams uint8, path string, fullPath string, handle
 // If no handle can be found, a TSR (trailing slash redirect) recommendation is
 // made if a handle exists with an extra (without the) trailing slash for the
 // given path.
+//根据uri和一些参数得到handles
+//tsr是树上的path是否以`/`结尾
+//unescape是是否需要QueryEscape解码
 func (n *node) getValue(path string, po Params, unescape bool) (handlers HandlersChain, p Params, tsr bool) {
 	p = po
 walk: // Outer loop for walking the tree
 	for {
+		// 如果当前节点path比path短 证明还要继续循环去找
+		// 这里的算法有点奇怪，满足当前节点的path是请求的path的一部分
+		// 就切割出后面的部分，然后去快速索引字符找首字母一样的
+		// 找到后就提取那个节点 继续循环
 		if len(path) > len(n.path) {
+			//如果path符合当前节点的path
+			//那么切割出后面的部分
 			if path[:len(n.path)] == n.path {
 				path = path[len(n.path):]
 				// If this node does not have a wildcard (param or catchAll)
 				// child,  we can just look up the next child node and continue
 				// to walk down the tree
+				// 如果当前节点不是参数节点的父节点 根据快速索引字符串 找到首字母相同的节点
+				// 然后n=那个节点 continue
 				if !n.wildChild {
 					c := path[0]
 					for i := 0; i < len(n.indices); i++ {
@@ -455,28 +491,36 @@ walk: // Outer loop for walking the tree
 					// Nothing found.
 					// We can recommend to redirect to the same URL without a
 					// trailing slash if a leaf exists for that path.
+					// 没找到节点 404或405
 					tsr = path == "/" && n.handlers != nil
 					return
 				}
 
 				// handle wildcard child
+				//下一个节点是参数节点或匹配节点
+				//现在n是参数节点或匹配节点了
 				n = n.children[0]
 				switch n.nType {
+				//参数节点
 				case param:
 					// find param end (either '/' or path end)
+					//提取参数节点名字
 					end := 0
 					for end < len(path) && path[end] != '/' {
 						end++
 					}
 
 					// save param value
+					//如果参数的空间大小比参数节点数量小，就再分配资源
 					if cap(p) < int(n.maxParams) {
 						p = make(Params, 0, n.maxParams)
 					}
+					//得到参数，赋值给返回的param
 					i := len(p)
 					p = p[:i+1] // expand slice within preallocated capacity
 					p[i].Key = n.path[1:]
 					val := path[:end]
+					//如果是QueryEscape 就解码 反之不用 直接赋值
 					if unescape {
 						var err error
 						if p[i].Value, err = url.QueryUnescape(val); err != nil {
@@ -487,7 +531,11 @@ walk: // Outer loop for walking the tree
 					}
 
 					// we need to go deeper!
+					//(吐槽一下这个注释好萌)
+					//参数节点后面还有path没有解析
 					if end < len(path) {
+						//如果有子节点
+						//因为参数节点后面跟的必定是一个`/`节点 所以直接取children[0]
 						if len(n.children) > 0 {
 							path = path[end:]
 							n = n.children[0]
@@ -495,13 +543,17 @@ walk: // Outer loop for walking the tree
 						}
 
 						// ... but we can't
+						// 没有子节点了 证明 404 or 405 了
 						tsr = len(path) == end+1
 						return
 					}
 
+					//参数节点后面没有path可解析了
 					if handlers = n.handlers; handlers != nil {
 						return
 					}
+
+					//该参数节点没有handle 如果参数节点有子节点 那么必定是`/` 就构成了tsr
 					if len(n.children) == 1 {
 						// No handle found. Check if a handle for this path + a
 						// trailing slash exists for TSR recommendation
@@ -512,13 +564,14 @@ walk: // Outer loop for walking the tree
 					return
 
 				case catchAll:
+					//如果是匹配节点
 					// save param value
 					if cap(p) < int(n.maxParams) {
 						p = make(Params, 0, n.maxParams)
 					}
 					i := len(p)
 					p = p[:i+1] // expand slice within preallocated capacity
-					p[i].Key = n.path[2:]
+					p[i].Key = n.path[2:] // 对于一个匹配节点 key应该为`/*`之后的所有内容 value是path后面所有字符
 					if unescape {
 						var err error
 						if p[i].Value, err = url.QueryUnescape(path); err != nil {
@@ -538,6 +591,7 @@ walk: // Outer loop for walking the tree
 		} else if path == n.path {
 			// We should have reached the node containing the handle.
 			// Check if this node has a handle registered.
+			//如果path一样了，那么证明当前节点就是要寻找的节点
 			if handlers = n.handlers; handlers != nil {
 				return
 			}
@@ -549,6 +603,7 @@ walk: // Outer loop for walking the tree
 
 			// No handle found. Check if a handle for this path + a
 			// trailing slash exists for trailing slash recommendation
+			//如果当前节点的handles是空的，看看子节点有没有`/` 如果有 证明tsr了
 			for i := 0; i < len(n.indices); i++ {
 				if n.indices[i] == '/' {
 					n = n.children[i]
@@ -563,6 +618,7 @@ walk: // Outer loop for walking the tree
 
 		// Nothing found. We can recommend to redirect to the same URL with an
 		// extra trailing slash if a leaf exists for that path
+		//这个相当于是判断该节点的path是不是path+'/'
 		tsr = (path == "/") ||
 			(len(n.path) == len(path)+1 && n.path[len(path)] == '/' &&
 				path == n.path[:len(n.path)-1] && n.handlers != nil)
@@ -574,6 +630,8 @@ walk: // Outer loop for walking the tree
 // It can optionally also fix trailing slashes.
 // It returns the case-corrected path and a bool indicating whether the lookup
 // was successful.
+//对给定的path不分大小写以及忽略末尾斜杠进行查找
+//如果tsr(尾斜杠)了就返回一个修复的路径
 func (n *node) findCaseInsensitivePath(path string, fixTrailingSlash bool) (ciPath []byte, found bool) {
 	ciPath = make([]byte, 0, len(path)+1) // preallocate enough memory
 
